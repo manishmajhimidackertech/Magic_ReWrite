@@ -60,5 +60,7 @@ export async function loadModules(root) {
     alignment: await load("alignment.js"),
     footnotes: await load("footnotes.js"),
     constants: await load("constants.js"),
+    // Absent before lines were placed by position.
+    placement: await load("placement.js").catch(() => null),
   };
 }

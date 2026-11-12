@@ -51,10 +51,11 @@ import {
 import {
   renderExtractedCanvases,
   renderInsertCanvases,
+  addInsertCanvas,
   updateRevisedPreview,
   updateRevisedWords,
-  onRevisedInput,
 } from "./modules/canvases.js";
+import { placeRevision } from "./modules/placement.js";
 import { processFile, reExtract } from "./modules/file-processor.js";
 import { renderNotesPage } from "./modules/footnotes.js";
 import { loadScript, patchDocumentXml } from "./modules/docx-writer.js";
@@ -148,23 +149,14 @@ recombineBtn.addEventListener("click", async () => {
 
   revisedWS.innerHTML = "";
   state.canvasTexts = [state.curExtracted];
+  // The line records go along. Text from a canvas left empty is missing
+  // from the combined text, so its line count then differs and the
+  // combined canvas is matched by wording instead.
+  state.canvasLines = [state.canvasLines.flat()];
   state.revisedTexts = [combined];
   recombineBtn.disabled = true;
 
-  const wrap = document.createElement("div");
-  wrap.className = "hum-canvas-wrap";
-  wrap.innerHTML = `
-    <div class="humanized-page">
-      <div class="humanized-content" contenteditable="true" spellcheck="false"
-           data-ph="All revised text combined here…" data-idx="0"></div>
-    </div>`;
-  revisedWS.appendChild(wrap);
-  const el = wrap.querySelector(".humanized-content");
-  el.textContent = combined;
-  el.addEventListener("input", () => onRevisedInput(0, el, wrap));
-  el.addEventListener("paste", () =>
-    setTimeout(() => onRevisedInput(0, el, wrap), 50),
-  );
+  addInsertCanvas(0, "Revised Text", "All revised text combined here…", combined);
 
   updateRevisedWords();
   updateRevisedPreview();
@@ -176,8 +168,8 @@ recombineBtn.addEventListener("click", async () => {
 function doClose() {
   state.curFile = null;
   state.curExtracted = "";
-  state.curCalloutKeys = new Map();
-  state.citationIndex = new Map();
+  state.lines = [];
+  state.canvasLines = [];
   state.originalDocHtml = "";
   state.docNotesHtml = "";
   state.canvasTexts = [];
@@ -220,8 +212,7 @@ reextBtn.onclick = () => reExtract();
   ═══════════════════════════════════════════════ */
 downloadBtn.addEventListener("click", async () => {
   if (!state.curFile) return;
-  const combined = state.revisedTexts.join("\n\n\n\n");
-  if (!combined.trim()) return;
+  if (!state.revisedTexts.some((t) => t.trim())) return;
 
   downloadBtn.disabled = true;
   setDownloadBtnLabel("💾", "Copying…");
@@ -230,24 +221,10 @@ downloadBtn.addEventListener("click", async () => {
     const buf = await state.curFile.arrayBuffer();
     const zip = await JSZip.loadAsync(buf);
 
-    const humanParas = combined
-      .split(/\n{2,}/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (!humanParas.length) {
-      downloadBtn.disabled = false;
-      setDownloadBtnLabel("💾", "Download<br>.docx");
-      return;
-    }
+    const { placements } = placeRevision(state.canvasLines, state.revisedTexts);
 
     let rawXml = await zip.file("word/document.xml").async("string");
-    rawXml = patchDocumentXml(
-      rawXml,
-      state.curExtracted,
-      humanParas,
-      state.curCalloutKeys,
-      state.citationIndex,
-    );
+    rawXml = patchDocumentXml(rawXml, placements);
     zip.file("word/document.xml", rawXml);
 
     const blob = await zip.generateAsync({

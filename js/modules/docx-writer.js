@@ -1,6 +1,7 @@
 "use strict";
 
-import { tokenSet, tokenSimilarity, buildAlignmentMap, matchKey } from "./alignment.js";
+import { matchKey } from "./alignment.js";
+import { locationOf } from "./placement.js";
 
 /* ═══════════════════════════════════════════════
      DOCX WRITER
@@ -163,31 +164,16 @@ function scanRuns(paraBlock) {
  * revised replacements while preserving footnotes, rPr formatting, and
  * special runs (bookmarks, proofErr, etc.).
  *
- * @param {string} rawXml          - raw XML string from the docx zip
- * @param {string} curExtracted    - full extracted text (ground truth)
- * @param {Array}  revisedParas      - revised paragraph strings
- * @param {Map}    curCalloutKeys  - from processElements
- * @returns {string}               - patched XML string
+ * Each paragraph is found by its location - its text and how many paragraphs
+ * before it had the same text - which is how the extractor recorded where
+ * every line came from. Nothing is matched by wording here.
+ *
+ * @param {string} rawXml   - raw XML string from the docx zip
+ * @param {Map}    placements - from placeRevision(): location → {value, label}
+ * @returns {string}        - patched XML string
  */
-export function patchDocumentXml(
-  rawXml,
-  curExtracted,
-  revisedParas,
-  curCalloutKeys,
-  citationIndex = new Map(),
-) {
-  const { extBlocks, mapping, lineMapping, calloutMap } = buildAlignmentMap(
-    curExtracted,
-    revisedParas,
-    curCalloutKeys,
-    citationIndex,
-  );
-
-  // extBlocks here is rawExtBlocks (newlines preserved)
-  const rawExtBlocks = extBlocks;
-  const normStr = (t) => t.replace(/\s+/g, " ").trim().toLowerCase();
-  const extNorm = extBlocks.map(normStr);
-  const usedXml = new Set();
+export function patchDocumentXml(rawXml, placements) {
+  if (!placements || !placements.size) return rawXml;
 
   /* ── Table range pre-scan ─────────────────────────────────────────── */
   // Outermost tables only, matched by nesting depth. Taking the first
@@ -213,83 +199,24 @@ export function patchDocumentXml(
     return false;
   }
 
-  /* ── findXmlIdx ───────────────────────────────────────────────────── */
-  function findXmlIdx(rawText) {
-    const en = matchKey(rawText);
-    if (!en) return -1;
-
-    // Pass 0: lineMapping hit - return the owning extBlock index. When the
-    // same original text appears in more than one block, lineMapping now
-    // stores one candidate {extIdx, value} per occurrence (sorted by
-    // document position); pick the first one not already consumed by an
-    // earlier physical paragraph in this document-order scan.
-    if (lineMapping.has(en)) {
-      const candidates = lineMapping.get(en);
-      for (const c of candidates) {
-        if (!usedXml.has(c.extIdx)) return c.extIdx;
-      }
-      if (candidates.length) return candidates[0].extIdx;
-    }
-
-    // Pass 1: exact match (unused first, then any)
-    for (let i = 0; i < extNorm.length; i++)
-      if (!usedXml.has(i) && extNorm[i] === en) return i;
-    for (let i = 0; i < extNorm.length; i++) if (extNorm[i] === en) return i;
-
-    // Pass 2: line-in-block containment
-    for (let i = 0; i < rawExtBlocks.length; i++) {
-      if (usedXml.has(i)) continue;
-      const blockLines = rawExtBlocks[i]
-        .split(/\n/)
-        .map((l) => normStr(l))
-        .filter(Boolean);
-      for (const bl of blockLines) {
-        if (bl === en) return i;
-        const blStripped = bl.replace(/^(-\s+|\d+\.\s+)/, "").trim();
-        if (blStripped === en) return i;
-      }
-      if (extNorm[i].startsWith(en) || en.startsWith(extNorm[i])) return i;
-    }
-
-    // Pass 3: token similarity
-    const hSet = tokenSet(en);
-    let bi = -1,
-      bs = 0;
-    for (let i = 0; i < extNorm.length; i++) {
-      if (usedXml.has(i)) continue;
-      const sim = tokenSimilarity(hSet, tokenSet(extBlocks[i]));
-      if (sim > bs) {
-        bs = sim;
-        bi = i;
-      }
-    }
-    return bs >= 0.35 ? bi : -1;
-  }
-
-  /* ── resolveRevised ─────────────────────────────────────────────── */
-  // Para-level lineMapping first; block-level only for single-line blocks.
-  function resolveRevised(rawText, extIdx) {
-    const lineKey = matchKey(rawText);
-    if (lineMapping.has(lineKey)) {
-      const candidates = lineMapping.get(lineKey);
-      const exact = candidates.find((c) => c.extIdx === extIdx);
-      if (exact) return exact.value;
-      if (candidates.length) return candidates[0].value;
-    }
-    if (!mapping.has(extIdx)) return null;
-    const blockLines = rawExtBlocks[extIdx]
-      .split(/\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (blockLines.length === 1) return mapping.get(extIdx);
-    return null;
-  }
+  const seen = new Map();
 
   /* ── Paragraph replacement ────────────────────────────────────────── */
+  // A self-closing <w:p .../> is matched on its own so it cannot open a
+  // match that runs on to the next paragraph's </w:p>.
   return rawXml.replace(
-    /(<w:p[ >][\s\S]*?<\/w:p>)/g,
-    function (paraBlock, _p1, offset) {
-      if (isInTable(offset)) return paraBlock;
+    /<w:p(?:\s[^>]*[^/>])?>[\s\S]*?<\/w:p>|<w:p(?:\s[^>]*)?\/>/g,
+    function (paraBlock, offset) {
+      if (paraBlock.endsWith("/>") || isInTable(offset)) return paraBlock;
+
+      // Count every paragraph the extractor counted, headings included,
+      // before deciding whether to touch it.
+      const key = matchKey(paragraphText(paraBlock).trim());
+      if (!key) return paraBlock;
+      const occ = seen.get(key) || 0;
+      seen.set(key, occ + 1);
+      const placed = placements.get(locationOf(key, occ));
+      if (!placed) return paraBlock;
 
       const styleM = paraBlock.match(/<w:pStyle\s+w:val="([^"]+)"/);
       if (
@@ -300,25 +227,7 @@ export function patchDocumentXml(
       )
         return paraBlock;
 
-      const plain = paragraphText(paraBlock).trim();
-      if (!plain) return paraBlock;
-
-      const extIdx = findXmlIdx(plain);
-      if (extIdx < 0) return paraBlock;
-      usedXml.add(extIdx);
-
-      if (!mapping.has(extIdx) && !lineMapping.has(matchKey(plain)))
-        return paraBlock;
-      const resolved = resolveRevised(plain, extIdx);
-      if (!resolved) return paraBlock;
-
-      // Strip list prefix added by processElements for list paragraphs
-      const isListPara = /<w:numPr>/.test(paraBlock);
-      const resolvedClean = normalizeTypography(
-        isListPara
-          ? resolved.replace(/^(-\s+|\d+\.\s+)/, "").trim()
-          : resolved,
-      );
+      const resolvedClean = normalizeTypography(placed.value);
       const newText = xmlEsc(resolvedClean);
 
       // Footnote-aware run surgery. Every run carrying text is removed and
@@ -341,28 +250,17 @@ export function patchDocumentXml(
       const rPrBlock = rPrMatch ? rPrMatch[0] : "";
 
       // Callout paragraphs need two runs: bold label + plain body
-      const calloutLabel = calloutMap.get(matchKey(plain));
+      const calloutLabel = placed.label;
       let newRuns;
       if (calloutLabel) {
         const boldRPr = ensureBold(rPrBlock);
         const plainRPr = stripBold(rPrBlock);
         const labelText = xmlEsc(calloutLabel + ": ");
-        const bodyText = xmlEsc(
-          resolvedClean.replace(
-            new RegExp(
-              "^" +
-                calloutLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-                ":\\s*",
-              "i",
-            ),
-            "",
-          ),
-        );
         newRuns =
           `<w:r>${boldRPr}<w:t xml:space="preserve">${labelText}</w:t></w:r>` +
           (plainRPr
-            ? `<w:r>${plainRPr}<w:t xml:space="preserve">${bodyText}</w:t></w:r>`
-            : `<w:r><w:t xml:space="preserve">${bodyText}</w:t></w:r>`);
+            ? `<w:r>${plainRPr}<w:t xml:space="preserve">${newText}</w:t></w:r>`
+            : `<w:r><w:t xml:space="preserve">${newText}</w:t></w:r>`);
       } else {
         newRuns = `<w:r>${rPrBlock}<w:t xml:space="preserve">${newText}</w:t></w:r>`;
       }

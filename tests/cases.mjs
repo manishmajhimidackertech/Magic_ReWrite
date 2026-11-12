@@ -335,4 +335,94 @@ export const cases = [
       }
     },
   },
+  {
+    name: "paragraphs reworded beyond recognition still go back to the paragraphs they were copied from",
+    regression: true,
+    async run(mods) {
+      const body =
+        heading("Method") +
+        text("Forty firms were surveyed across three states during the spring.") +
+        text("Most of them reported at least one serious incident last year.") +
+        heading("Findings") +
+        text("Breaches rose sharply over the last financial year.");
+      // No word of three letters or more in common with what it replaces.
+      const revised = [
+        "Investigators questioned dozens of businesses nationwide.",
+        "Nearly all admitted some kind of lapse.",
+        "",
+        "Security problems became far more common recently.",
+      ];
+      const doc = await open(mods, await buildDocx(body));
+      const out = await roundTrip(mods, null, revised.join("\n"), doc);
+      const shown = preview(mods, doc, revised.join("\n"));
+      for (const where of [out.text, shown]) {
+        assertOnce(where, revised.filter(Boolean));
+        assert.ok(where.indexOf("Nearly all") < where.indexOf("Findings"), "in the Method section");
+        assert.ok(where.indexOf("Findings") < where.indexOf("Security problems"), "in the Findings section");
+      }
+    },
+  },
+  {
+    name: "a section rewritten to resemble another section is not swapped with it",
+    regression: true,
+    async run(mods) {
+      const body =
+        heading("Costs") +
+        text("Energy costs climbed steadily through winter as gas prices soared.") +
+        heading("Staffing") +
+        text("Staff turnover fell once flexible rosters were introduced in March.");
+      // Each revision shares more words with the other section's original.
+      const first = "Once flexible rosters were introduced, staff felt energy costs.";
+      const second = "Through winter, gas prices soared and turnover fell.";
+      const out = await roundTrip(mods, body, `${first}\n\n\n\n${second}`);
+      const t = out.text;
+      assert.ok(t.indexOf(first) >= 0 && t.indexOf(first) < t.indexOf("Staffing"), t);
+      assert.ok(t.indexOf("Staffing") < t.indexOf(second), t);
+    },
+  },
+  {
+    name: "list items are shown with a bullet character, not a hyphen",
+    regression: true,
+    async run(mods) {
+      const doc = await open(mods, fs.readFileSync(path.join(ROOT, "tests/scenarios/05-lists/input.docx")));
+      const lines = doc.out.split("\n");
+      assert.ok(lines.filter((l) => l.startsWith("\u2022 ")).length >= 6, doc.out);
+      assert.deepEqual(lines.filter((l) => /^-\s/.test(l)), []);
+    },
+  },
+  {
+    name: "a bullet the rewriter kept, or turned into a hyphen, is not written into the list item",
+    regression: true,
+    async run(mods) {
+      const doc = await open(mods, fs.readFileSync(path.join(ROOT, "tests/scenarios/05-lists/input.docx")));
+      let n = 0;
+      const revised = doc.out.replace(/^(?:\u2022 |- )?(?=\S)/gm, (bullet) =>
+        bullet ? (n++ % 2 ? "- Revised " : "\u2022 Revised ") : "Revised ",
+      );
+      assert.ok(n >= 6);
+      const out = await roundTrip(mods, null, revised, doc);
+      const paras = out.text.split(/\n+/).filter(Boolean);
+      assert.deepEqual(paras.filter((p) => /^(\u2022|-)\s/.test(p)), [], "no bullet or hyphen left at the start of a paragraph");
+      assert.ok(paras.filter((p) => p.startsWith("Revised ")).length >= n);
+    },
+  },
+  {
+    name: "a line the rewriter added before its answer is left out, and the rest still placed",
+    async run(mods) {
+      const body =
+        heading("Method") +
+        text("Forty firms were surveyed across three states during the spring.") +
+        text("Most of them reported at least one serious incident last year.");
+      const revised =
+        "Here is the revised text:\n\n" +
+        "Forty companies in three states were surveyed during the spring.\n" +
+        "Most of them reported at least one serious incident over the last year.";
+      const out = await roundTrip(mods, body, revised);
+      assert.doesNotMatch(out.text, /Here is the revised text/);
+      assertOnce(out.text, [
+        "Forty companies in three states were surveyed during the spring.",
+        "Most of them reported at least one serious incident over the last year.",
+      ]);
+    },
+  },
 ];

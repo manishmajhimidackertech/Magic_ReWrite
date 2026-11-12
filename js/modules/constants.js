@@ -47,5 +47,14 @@ export function headingLevel(styleName) {
   return null;
 }
 
+/* ── List items ─────────────────────────────────────────────────────────
+   Bullet items are shown with a real bullet, not "- ": a leading hyphen is
+   easily read as a dash, and the writer turns spaced hyphens into dashes.
+   The prefix pattern still accepts a hyphen, an asterisk or a number,
+   because a rewriter may hand any of them back on a list item. */
+export const BULLET = "\u2022";
+export const LIST_PREFIX_RE =
+  /^(?:[\u2022\u25E6\u25AA\u25CF\u2023\u2043\u2013\u2014*-]\s+|\d+[.)]\s+)/;
+
 export const FREE_WORD_LIMIT = 1000;
 export const PAID_WORD_LIMIT = 5000;

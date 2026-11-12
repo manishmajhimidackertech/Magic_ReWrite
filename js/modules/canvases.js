@@ -15,7 +15,8 @@ import {
 } from "./ui.js";
 import { buildRevisedHtml } from "./preview.js";
 import { renderNotesPage } from "./footnotes.js";
-import { splitIntoCanvases } from "./extractor.js";
+import { splitIntoCanvases, linesPerCanvas } from "./extractor.js";
+import { placeRevision } from "./placement.js";
 import { FREE_WORD_LIMIT, PAID_WORD_LIMIT } from "./constants.js";
 import { state } from "./state.js";
 
@@ -32,6 +33,7 @@ export function renderExtractedCanvases() {
   // wall of text with no word count and no way to work through it in pieces.
   const limit = state.isPaidAccount ? PAID_WORD_LIMIT : FREE_WORD_LIMIT;
   state.canvasTexts = splitIntoCanvases(state.curExtracted, limit);
+  state.canvasLines = linesPerCanvas(state.canvasTexts, state.lines);
   state.canvasTexts.forEach((chunk, idx) => {
     const wc = chunk.split(/\s+/).filter(Boolean).length;
     const label =
@@ -84,48 +86,74 @@ export function renderInsertCanvases() {
   state.revisedTexts = new Array(count).fill("");
 
   for (let idx = 0; idx < count; idx++) {
-    const wrap = document.createElement("div");
-    wrap.className = "hum-canvas-wrap";
     const label = count > 1 ? `Part ${idx + 1} of ${count}` : "Revised Text";
-    wrap.innerHTML = `
-      <div class="humanized-page waiting">
-        <div class="humanized-content" contenteditable="true" spellcheck="false"
-             data-ph="⌘+V / Ctrl+V - Paste revised text for ${label}…"
-             data-idx="${idx}"></div>
-      </div>`;
-    revisedWS.appendChild(wrap);
-    const el = wrap.querySelector(".humanized-content");
-    el.addEventListener("input", () => onRevisedInput(idx, el, wrap));
-    el.addEventListener("paste", () =>
-      setTimeout(() => onRevisedInput(idx, el, wrap), 50),
-    );
+    addInsertCanvas(idx, label, `⌘+V / Ctrl+V - Paste revised text for ${label}…`);
   }
+  updateCanvasStatus();
+}
+
+/** One paste canvas on the Revise tab, with a header holding its label and
+ *  how its text is being placed. */
+export function addInsertCanvas(idx, label, placeholder, text = "") {
+  const wrap = document.createElement("div");
+  wrap.className = "hum-canvas-wrap";
+  wrap.innerHTML = `
+    <div class="hum-canvas-header">
+      <span class="hum-canvas-label"></span>
+      <span class="hum-canvas-status"></span>
+    </div>
+    <div class="humanized-page${text ? "" : " waiting"}">
+      <div class="humanized-content" contenteditable="true" spellcheck="false"
+           data-idx="${idx}"></div>
+    </div>`;
+  wrap.querySelector(".hum-canvas-label").textContent = label;
+  revisedWS.appendChild(wrap);
+  const el = wrap.querySelector(".humanized-content");
+  el.dataset.ph = placeholder;
+  el.textContent = text;
+  el.addEventListener("input", () => onRevisedInput(idx, el, wrap));
+  el.addEventListener("paste", () =>
+    setTimeout(() => onRevisedInput(idx, el, wrap), 50),
+  );
+  return el;
 }
 
 export function onRevisedInput(idx, el, wrap) {
   const text = el.innerText || "";
   state.revisedTexts[idx] = text;
-  const wc = text.split(/\s+/).filter(Boolean).length;
-  const statusEl = wrap.querySelector(".hum-canvas-status");
   const page = wrap.querySelector(".humanized-page");
-  if (wc === 0) {
-    if (statusEl) {
-      statusEl.textContent = `~${(state.canvasTexts[idx] || "")
-        .split(/\s+/)
-        .filter(Boolean)
-        .length.toLocaleString()} words expected`;
-      statusEl.className = "hum-canvas-status";
-    }
-    page.classList.add("waiting");
-  } else {
-    if (statusEl) {
-      statusEl.textContent = `${wc.toLocaleString()} words`;
-      statusEl.className = "hum-canvas-status filled";
-    }
-    page.classList.remove("waiting");
-  }
+  page.classList.toggle("waiting", !text.trim());
   updateRevisedWords();
   updateRevisedPreview();
+}
+
+const countWords = (t) => (t || "").split(/\s+/).filter(Boolean).length;
+const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
+
+/** Say, on each paste canvas, whether its text goes back line by line or
+ *  has to be matched by wording because its line count differs. */
+function updateCanvasStatus(status = []) {
+  const els = revisedWS.querySelectorAll(".hum-canvas-status");
+  els.forEach((el, k) => {
+    const st = status[k] || { mode: "empty" };
+    const words = countWords(state.revisedTexts[k]);
+    el.removeAttribute("title");
+    if (st.mode === "position") {
+      el.textContent = `${plural(words, "word")} · placed line by line`;
+      el.className = "hum-canvas-status filled";
+    } else if (st.mode === "wording") {
+      el.textContent = `${st.got} of ${plural(st.expected, "line")} · matched by wording`;
+      el.className = "hum-canvas-status partial";
+      el.title =
+        `This part has ${plural(st.got, "line")} but was copied as ` +
+        `${plural(st.expected, "line")}, so its lines are matched to the ` +
+        "document by their wording. With one line for each line copied, " +
+        "every line goes back exactly where it came from.";
+    } else {
+      el.textContent = `~${plural(countWords(state.canvasTexts[k]), "word")} expected`;
+      el.className = "hum-canvas-status";
+    }
+  });
 }
 
 export function updateRevisedWords() {
@@ -146,18 +174,13 @@ export function updateRevisedWords() {
   ═══════════════════════════════════════════════ */
 
 export function updateRevisedPreview() {
-  const combined = state.revisedTexts.join("\n\n\n\n");
-  // Keep internal single-newlines intact - buildAlignmentMap relies on them
-  // to line up a multi-sentence block with its per-line revisions. This
-  // used to collapse every newline to a space before matching, which
-  // destroyed that structure for any multi-line block and silently left
-  // the ORIGINAL text showing in the preview even though a valid revision
-  // had been pasted. This now mirrors exactly how app.js's download
-  // handler splits `combined` into paragraphs.
-  const paras = combined
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
+  // The same placement the download handler writes, so the preview shows
+  // exactly what the file will contain.
+  const { placements, status } = placeRevision(
+    state.canvasLines,
+    state.revisedTexts,
+  );
+  updateCanvasStatus(status);
 
   const filledCount = state.revisedTexts.filter(
     (t) => t.trim().length > 0,
@@ -167,7 +190,7 @@ export function updateRevisedPreview() {
   const emptyMsg =
     '<p style="color:#888;font-style:italic;">The document preview will appear here after you paste revised text on the left.</p>';
 
-  if (!state.originalDocHtml || paras.length === 0) {
+  if (!state.originalDocHtml || filledCount === 0) {
     revisedDocHtml.innerHTML = emptyMsg;
     // The notes page belongs to the document, not to the revision, so it
     // stays hidden until there is a preview for it to sit beneath.
@@ -177,13 +200,7 @@ export function updateRevisedPreview() {
     return;
   }
 
-  const { html: newHtml } = buildRevisedHtml(
-    state.originalDocHtml,
-    paras,
-    state.curExtracted,
-    state.curCalloutKeys,
-    state.citationIndex,
-  );
+  const { html: newHtml } = buildRevisedHtml(state.originalDocHtml, placements);
   revisedDocHtml.innerHTML = newHtml;
   // Footnotes are carried through untouched: they were never part of the
   // extracted text, so nothing pasted on the left can revise them.
