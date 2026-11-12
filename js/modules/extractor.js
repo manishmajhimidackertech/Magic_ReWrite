@@ -11,8 +11,10 @@ import {
   REF_HEADING_RE,
   POST_REF_HEADING_RE,
   headingLevel,
+  BULLET,
 } from "./constants.js";
 import { stripCitations, buildCitationIndex } from "./citations.js";
+import { matchKey } from "./alignment.js";
 
 /* ═══════════════════════════════════════════════
      EXTRACTION LOGIC
@@ -117,12 +119,27 @@ export function processElements(elems) {
   }
   function pfx(e) {
     const s = nm(e.st);
-    if (BUL.has(s)) return "- ";
     if (NUM.has(s)) return `${nxt(e.ni ?? 0, e.lv)}. `;
-    return "- ";
+    return BULLET + " ";
+  }
+
+  // Where each paragraph is: its text in the form the writer and the preview
+  // read it back in (matchKey), and how many paragraphs before it had that
+  // same text. Every paragraph is counted, kept or not, because the writer
+  // and the preview count every paragraph they walk past too. With that, a
+  // revised line goes back to the paragraph it was copied from by position,
+  // not by guessing from its wording.
+  const seen = new Map();
+  function locate(raw) {
+    const key = matchKey(raw);
+    if (!key) return { key: "", occ: 0 };
+    const occ = seen.get(key) || 0;
+    seen.set(key, occ + 1);
+    return { key, occ };
   }
 
   const bl = []; // output block list: { k: "x"|"t", ... }
+  const inCells = []; // locations of paragraphs left out for repeating a cell
   let ps = false; // previous element was a section heading
   let pi = false; // previous element was a skipped/label-only heading
 
@@ -140,8 +157,11 @@ export function processElements(elems) {
       bl.push({ k: "t", v: e.v });
       continue;
     }
-    const { st, raw, bold, isList } = e,
+    const { st, bold, isList } = e,
       s = nm(st);
+    // One paragraph is one line of extracted text, whatever is inside it.
+    const raw = (e.raw || "").replace(/\s*\n\s*/g, " ");
+    const loc = locate(raw);
     const lvl = headingLevel(st);
     const headingText = (raw || "").trim();
 
@@ -173,6 +193,12 @@ export function processElements(elems) {
       pi = false;
       continue;
     }
+    // A paragraph repeating a table cell's text is shown once, in the
+    // table's text, so that line is where it is revised.
+    if (raw && ct.has(raw) && !SKIP.has(s)) {
+      if (loc.key) inCells.push(loc);
+      continue;
+    }
     if (skP(st, raw, ct)) continue;
 
     const hr = iHead(bold, raw, isList);
@@ -198,6 +224,7 @@ export function processElements(elems) {
             ns: ps,
             im: true,
             cites,
+            ...loc,
           });
           ps = false;
           pi = false;
@@ -221,25 +248,44 @@ export function processElements(elems) {
       ns,
       im,
       cites,
+      ...loc,
     });
   }
 
-  // Assemble output string
+  // Assemble the output string, and beside it one record per line of it:
+  // the separator before the line, and for a paragraph, where it came from.
+  // Table lines have no key - they are there for context and never written.
   let out = "";
-  const as = (c) => {
-    if (!c) return;
-    out = out ? out + "\n\n\n\n" + c : c;
+  const lines = [];
+  const add = (sep, text, rec = {}) => {
+    if (!out) sep = "";
+    out += sep + text;
+    lines.push({ text, sep, key: "", occ: 0, cites: [], label: "", isList: false, ...rec });
   };
   for (const b of bl) {
     if (b.k === "t") {
       const d = dTable(b.v);
-      if (d) as(d);
+      if (!d) continue;
+      const parts = d.split(/(\n+)/);
+      // A table line is context and is never written back - unless a body
+      // paragraph with the same text was left out above, in which case the
+      // line stands for that paragraph.
+      const cellLine = (sep, text) => {
+        const key = matchKey(text);
+        const i = inCells.findIndex((l) => l.key === key);
+        add(sep, text, i < 0 ? {} : inCells.splice(i, 1)[0]);
+      };
+      cellLine("\n\n\n\n", parts[0]);
+      for (let i = 1; i < parts.length; i += 2) cellLine(parts[i], parts[i + 1]);
       continue;
     }
-    if (!out) out = b.text;
-    else if (b.ns) out += "\n\n\n\n" + b.text;
-    else if (b.im) out += "\n\n" + b.text;
-    else out += "\n" + b.text;
+    add(b.ns ? "\n\n\n\n" : b.im ? "\n\n" : "\n", b.text, {
+      key: b.key,
+      occ: b.occ,
+      cites: b.cites || [],
+      label: b.label || "",
+      isList: !!b.isList,
+    });
   }
 
   // calloutKeys: Map from normStr(text) → original-cased text
@@ -284,7 +330,22 @@ export function processElements(elems) {
     },
   ].filter(Boolean);
 
-  return { out, pills, nW, calloutKeys, citationIndex };
+  return { out, lines, pills, nW, calloutKeys, citationIndex };
+}
+
+/**
+ * The line records belonging to each canvas. Canvases are cut only between
+ * lines, so walking them in order and counting their lines hands every
+ * record to the canvas its line went into.
+ */
+export function linesPerCanvas(canvases, lines) {
+  let at = 0;
+  return canvases.map((c) => {
+    const n = c.split("\n").filter((l) => l.trim()).length;
+    const own = lines.slice(at, at + n);
+    at += n;
+    return own;
+  });
 }
 
 /* ═══════════════════════════════════════════════

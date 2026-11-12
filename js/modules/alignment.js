@@ -1,6 +1,7 @@
 "use strict";
 
 import { restoreFor, sc } from "./citations.js";
+import { LIST_PREFIX_RE } from "./constants.js";
 
 /**
  * The form a paragraph's text is compared in, wherever a paragraph of the
@@ -242,7 +243,7 @@ export function buildAlignmentMap(
         origLines.forEach((ol, i) => {
           pushLineMapping(normStr2(ol), extIdx, humLines[i]);
           // Also register without list prefix for XML para matching
-          const stripped = ol.replace(/^(-\s+|\d+\.\s+)/, "").trim();
+          const stripped = ol.replace(LIST_PREFIX_RE, "").trim();
           if (stripped !== ol)
             pushLineMapping(normStr2(stripped), extIdx, humLines[i]);
         });
@@ -276,7 +277,7 @@ export function buildAlignmentMap(
           }
           if (bi >= 0 && bs >= 0.08) {
             pushLineMapping(normStr2(ol), extIdx, humLines[bi]);
-            const stripped = ol.replace(/^(-\s+|\d+\.\s+)/, "").trim();
+            const stripped = ol.replace(LIST_PREFIX_RE, "").trim();
             if (stripped !== ol)
               pushLineMapping(normStr2(stripped), extIdx, humLines[bi]);
             usedH.add(bi);
@@ -305,7 +306,7 @@ export function buildAlignmentMap(
       [...allOrigLines.keys()].filter(
         (k) =>
           !lineMapping.has(k) &&
-          !lineMapping.has(normStr2(k.replace(/^(-\s+|\d+\.\s+)/, "").trim())),
+          !lineMapping.has(normStr2(k.replace(LIST_PREFIX_RE, "").trim())),
       ),
     );
     const unmappedOrigSets = new Map(
@@ -336,7 +337,7 @@ export function buildAlignmentMap(
       for (const hl of hL) {
         const hlTrim = hl.trim();
         if (!hlTrim || mappedHumLines.has(hlTrim)) continue;
-        const hlSet = tokenSet(hlTrim.replace(/^-\s+/, ""));
+        const hlSet = tokenSet(hlTrim.replace(LIST_PREFIX_RE, ""));
         let bestKey = null,
           bestSim = 0;
         for (const [k, kSet] of unmappedOrigSets) {
@@ -348,7 +349,7 @@ export function buildAlignmentMap(
         }
         if (bestKey && bestSim >= 0.25) {
           pushLineMapping(bestKey, extIdx, hlTrim);
-          const stripped = bestKey.replace(/^(-\s+|\d+\.\s+)/, "").trim();
+          const stripped = bestKey.replace(LIST_PREFIX_RE, "").trim();
           if (stripped !== bestKey) pushLineMapping(stripped, extIdx, hlTrim);
           unmappedOrigSets.delete(bestKey);
           unmappedOrigKeys.delete(bestKey);

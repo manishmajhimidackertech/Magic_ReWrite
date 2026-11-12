@@ -7,6 +7,7 @@ import JSZip from "jszip";
 import { gtxt, bFlag, tVals } from "../../js/modules/mammoth-helpers.js";
 import { processElements } from "../../js/modules/extractor.js";
 import { patchDocumentXml } from "../../js/modules/docx-writer.js";
+import { placeRevision } from "../../js/modules/placement.js";
 
 function buildTransform(elems) {
   return (doc) => {
@@ -39,16 +40,21 @@ export async function runPipeline(docxPath, revisedParas) {
     { buffer: buf },
     { transformDocument: buildTransform(elems) },
   );
-  const { out, calloutKeys, pills, nW } = processElements(elems);
+  const { out, lines, calloutKeys, pills, nW } = processElements(elems);
+
+  // Everything pasted into one canvas, as after Re-combine.
+  const { placements, status } = placeRevision([lines], [revisedParas.join("\n\n")]);
 
   const zip = await JSZip.loadAsync(buf);
   const inputXml = await zip.file("word/document.xml").async("string");
-  const outputXml = patchDocumentXml(inputXml, out, revisedParas, calloutKeys);
+  const outputXml = patchDocumentXml(inputXml, placements);
   zip.file("word/document.xml", outputXml);
   const outputBuf = await zip.generateAsync({ type: "nodebuffer" });
 
   return {
     extracted: out,
+    lines,
+    status,
     calloutKeys,
     pills,
     nW,

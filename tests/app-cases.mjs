@@ -144,4 +144,19 @@ export const appCases = [
       assert.equal(app.state.insertMode, false, "the Revise tab stays shut with no document");
     },
   },
+  {
+    name: "each paste canvas says whether its text goes back line by line or is matched by wording",
+    regression: true,
+    async run(app) {
+      await app.open(LISTS, "lists.docx");
+      app.click("insertTab");
+      const status = () => app.$("humanizedWS").querySelector(".hum-canvas-status").textContent;
+      assert.match(status(), /expected/);
+      const lines = app.state.canvasTexts[0].split("\n").filter((l) => l.trim());
+      app.paste(0, lines.map((l) => "Revised " + l).join("\n"));
+      assert.match(status(), /placed line by line/);
+      app.paste(0, lines.slice(1).map((l) => "Revised " + l).join("\n"));
+      assert.match(status(), new RegExp(`${lines.length - 1} of ${lines.length} lines · matched by wording`));
+    },
+  },
 ];

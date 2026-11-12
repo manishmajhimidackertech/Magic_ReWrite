@@ -107,10 +107,9 @@ export async function processFile(file) {
     state.originalDocHtml = docHTML.innerHTML;
 
     showLoad("Extracting body text…");
-    const { out, pills, nW, calloutKeys, citationIndex } = processElements(elems);
+    const { out, lines, pills, nW } = processElements(elems);
     state.curExtracted = out;
-    state.curCalloutKeys = calloutKeys;
-    state.citationIndex = citationIndex;
+    state.lines = lines;
     showBadges(pills, nW);
     // Counted across both pages, so moving the notes onto their own canvas
     // doesn't silently change the number shown for the same document.
@@ -153,10 +152,9 @@ export async function reExtract() {
       { arrayBuffer: buf },
       { transformDocument: buildTransform(elems) },
     );
-    const { out, pills, nW, calloutKeys, citationIndex } = processElements(elems);
+    const { out, lines, pills, nW } = processElements(elems);
     state.curExtracted = out;
-    state.curCalloutKeys = calloutKeys;
-    state.citationIndex = citationIndex;
+    state.lines = lines;
     showBadges(pills, nW);
     renderExtractedCanvases();
   } catch (err) {

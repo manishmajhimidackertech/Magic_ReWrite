@@ -1,8 +1,9 @@
 // Test 03 - Reordered revised paragraphs
 //
-// buildAlignmentMap() matches revised paragraphs to original ones by
-// content similarity. This checks robustness to the revised paragraphs
-// being supplied out of the source document's order.
+// A paste with a different line count from the extraction is matched by
+// wording (buildAlignmentMap), not placed by position. This fixture's
+// revision has two more lines than the extraction, so it takes that path,
+// and checks it is robust to the paragraphs being supplied out of order.
 //
 // Scenario A (mild - adjacent swap): resolves via the pass-1 exact-match
 // step, which considers the whole array regardless of position.

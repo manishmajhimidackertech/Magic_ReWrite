@@ -1,13 +1,14 @@
 "use strict";
 
-import { tokenSet, tokenSimilarity, buildAlignmentMap, matchKey } from "./alignment.js";
+import { matchKey } from "./alignment.js";
+import { locationOf } from "./placement.js";
 
 /* ═══════════════════════════════════════════════
      LIVE PARTIAL PREVIEW
-     Builds the HTML preview using similarity-based
-     paragraph alignment against the original mammoth
-     HTML.  Partially filled canvases render immediately;
-     unmatched originals stay as-is.
+     Writes the placed revision into mammoth's HTML
+     of the original. Paragraphs with nothing placed
+     yet stay as they are, so a half-filled Revise
+     tab previews correctly.
   ═══════════════════════════════════════════════ */
 
 /** Collect every descendant text node of `el`, in document order, without
@@ -18,9 +19,10 @@ function collectTextNodes(el, out) {
     if (node.nodeType === Node.TEXT_NODE) {
       out.push(node);
     } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // A nested list is the next paragraphs, not part of this one.
       if (
         node.matches &&
-        node.matches('a[href^="#footnote"], a[href^="#endnote"]')
+        node.matches('a[href^="#footnote"], a[href^="#endnote"], ul, ol')
       )
         continue;
       collectTextNodes(node, out);
@@ -52,142 +54,24 @@ export function replaceTextOnly(el, newText) {
 }
 
 /**
- * Produce a new HTML string by replacing matched paragraphs in originalHtml
- * with their revised counterparts.
+ * Produce a new HTML string by replacing the paragraphs that have a placed
+ * revision. Paragraphs are found by location - their text and how many
+ * before them share it - exactly as the writer finds them in document.xml.
  *
- * @param {string} originalHtml    - mammoth HTML of the original docx
- * @param {Array}  revisedParas  - flat list of revised paragraph strings
- * @param {string} curExtracted    - full extracted text (ground truth)
- * @param {Map}    curCalloutKeys  - from processElements
- * @returns {{ html: string }} - patched inner HTML
+ * @param {string} originalHtml - mammoth HTML of the original docx
+ * @param {Map}    placements   - from placeRevision(): location → {value, label}
+ * @returns {{ html: string }}  - patched inner HTML
  */
-export function buildRevisedHtml(
-  originalHtml,
-  revisedParas,
-  curExtracted,
-  curCalloutKeys,
-  citationIndex = new Map(),
-) {
-  if (!revisedParas.length) return { html: originalHtml };
+export function buildRevisedHtml(originalHtml, placements) {
+  if (!placements || !placements.size) return { html: originalHtml };
 
-  const { extBlocks, mapping, lineMapping, calloutMap } =
-    buildAlignmentMap(curExtracted, revisedParas, curCalloutKeys, citationIndex);
+  const seen = new Map();
 
-  const norm = (t) => t.replace(/\s+/g, " ").trim().toLowerCase();
-  const extNormArr = extBlocks.map(norm);
-  const usedExtIdx = new Set();
-
-  /* ── findExtIdx ─────────────────────────────────────────────────── */
-  function findExtIdx(rawText) {
-    const en = matchKey(rawText);
-    if (!en) return -1;
-
-    // Pass 0: lineMapping hit - find parent block. lineMapping now stores
-    // an array of {extIdx, value} candidates per key (one per physical
-    // occurrence of that text, sorted by document position) rather than a
-    // single value, so duplicate original text across different blocks
-    // doesn't collide. Prefer a candidate whose block hasn't been used
-    // yet in this preview pass.
-    if (lineMapping.has(en)) {
-      const candidates = lineMapping.get(en);
-      for (const c of candidates) {
-        if (!usedExtIdx.has(c.extIdx)) return c.extIdx;
-      }
-      if (candidates.length) return candidates[0].extIdx;
-    }
-
-    // Pass 1: exact block match
-    for (let i = 0; i < extNormArr.length; i++)
-      if (!usedExtIdx.has(i) && extNormArr[i] === en) return i;
-    for (let i = 0; i < extNormArr.length; i++)
-      if (extNormArr[i] === en) return i;
-
-    // Pass 2: line-in-block containment
-    for (let i = 0; i < extBlocks.length; i++) {
-      if (usedExtIdx.has(i)) continue;
-      const blockLines = extBlocks[i]
-        .split(/\n/)
-        .map((l) => norm(l))
-        .filter(Boolean);
-      for (const bl of blockLines) {
-        if (bl === en) return i;
-        const blStripped = bl.replace(/^(-\s+|\d+\.\s+)/, "").trim();
-        if (blStripped === en) return i;
-      }
-      if (extNormArr[i].startsWith(en) || en.startsWith(extNormArr[i]))
-        return i;
-    }
-
-    // Pass 3: token similarity
-    const hSet = tokenSet(en);
-    let bi = -1,
-      bs = 0;
-    for (let i = 0; i < extNormArr.length; i++) {
-      if (usedExtIdx.has(i)) continue;
-      const sim = tokenSimilarity(hSet, tokenSet(extBlocks[i]));
-      if (sim > bs) {
-        bs = sim;
-        bi = i;
-      }
-    }
-    return bs >= 0.35 ? bi : -1;
-  }
-
-  /* ── resolveHtmlReplacement ─────────────────────────────────────── */
-  function resolveHtmlReplacement(rawText, extIdx) {
-    const key = matchKey(rawText);
-    if (lineMapping.has(key)) {
-      const candidates = lineMapping.get(key);
-      const exact = candidates.find((c) => c.extIdx === extIdx);
-      if (exact) return exact.value;
-      if (candidates.length) return candidates[0].value;
-    }
-    if (!mapping.has(extIdx)) return null;
-    const blockLines = extBlocks[extIdx]
-      .split(/\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (blockLines.length === 1) return mapping.get(extIdx);
-    return null;
-  }
-
-  /* ── DOM walk ───────────────────────────────────────────────────── */
-  function consumeTableBlocks(tableEl) {
-    const rows = Array.from(tableEl.querySelectorAll("tr"));
-    if (!rows.length) return;
-    const colCount = rows.reduce((mx, r) => Math.max(mx, r.cells.length), 0);
-    for (let c = 0; c < colCount; c++) {
-      const colTexts = rows
-        .map((r) => {
-          const cell = r.cells[c];
-          return cell ? norm(cell.textContent) : "";
-        })
-        .filter(Boolean);
-      if (!colTexts.length) continue;
-      const colJoined = colTexts.join(" ");
-      let bestI = -1,
-        bs = 0;
-      for (let i = 0; i < extNormArr.length; i++) {
-        if (usedExtIdx.has(i)) continue;
-        const mn = Math.min(colJoined.length, extNormArr[i].length);
-        let com = 0;
-        while (com < mn && colJoined[com] === extNormArr[i][com]) com++;
-        const sc_ = com / Math.max(colJoined.length, extNormArr[i].length);
-        if (sc_ > bs) {
-          bs = sc_;
-          bestI = i;
-        }
-      }
-      if (bestI >= 0 && bs >= 0.4) usedExtIdx.add(bestI);
-    }
-  }
-
-  /** Text used for matching against extracted blocks - excludes footnote/
-   *  endnote reference markers (mammoth renders these as an inline
-   *  <sup><a href="#footnote-N">[N]</a></sup>, whose visible "[N]" text is
-   *  part of el.textContent but was never part of the extracted text used
-   *  to build the alignment map, so including it here silently broke every
-   *  match for any paragraph that has a footnote). */
+  /** Text used for locating the paragraph - excludes footnote/endnote
+   *  reference markers (mammoth renders these as an inline
+   *  <sup><a href="#footnote-N">[N]</a></sup>, whose visible "[N]" text was
+   *  never part of the extracted text) and a list item's nested list, which
+   *  is its own paragraphs. */
   function matchText(el) {
     const clone = el.cloneNode(true);
     for (const a of clone.querySelectorAll(
@@ -196,6 +80,7 @@ export function buildRevisedHtml(
       const sup = a.closest("sup") || a;
       sup.remove();
     }
+    for (const list of clone.querySelectorAll("ul, ol")) list.remove();
     // A soft line break is a space in the extracted text (see gtxt), but
     // contributes nothing to textContent.
     for (const br of clone.querySelectorAll("br"))
@@ -203,47 +88,28 @@ export function buildRevisedHtml(
     return clone.textContent.trim();
   }
 
+  const esc = (t) =>
+    t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   function walkNode(el) {
     const tag = el.tagName ? el.tagName.toLowerCase() : "";
-    if (/^h[1-6]$/.test(tag)) return;
-    if (tag === "table") {
-      consumeTableBlocks(el);
-      return;
-    }
-    if (tag === "ul" || tag === "ol") {
-      for (const child of el.children) walkNode(child);
-      return;
-    }
-    if (tag === "p" || tag === "li") {
-      const txt = matchText(el);
-      if (!txt) return;
-      if (/\t\d+$/.test(txt)) return;
-      if (/^\[\d[\d,\-\s]*\]$/.test(txt)) return;
-      const extIdx = findExtIdx(txt);
-      if (extIdx >= 0) {
-        usedExtIdx.add(extIdx);
-        const replacement = resolveHtmlReplacement(txt, extIdx);
-        if (replacement) {
-          const calloutLabel = calloutMap.get(matchKey(txt));
-          if (calloutLabel) {
-            const body = replacement.replace(
-              new RegExp(
-                "^" +
-                  calloutLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-                  ":\\s*",
-                "i",
-              ),
-              "",
-            );
-            el.innerHTML = `<strong>${calloutLabel}:</strong> ${body
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")}`;
-          } else {
-            replaceTextOnly(el, replacement);
-          }
-        }
+    if (tag === "table") return;
+    if (/^h[1-6]$/.test(tag) || tag === "p" || tag === "li") {
+      // Headings are counted, as the extractor and the writer count them,
+      // but never revised.
+      const key = matchKey(matchText(el));
+      if (key) {
+        const occ = seen.get(key) || 0;
+        seen.set(key, occ + 1);
+        const placed =
+          tag[0] === "h" ? null : placements.get(locationOf(key, occ));
+        if (placed && placed.label)
+          el.innerHTML = `<strong>${esc(placed.label)}:</strong> ${esc(placed.value)}`;
+        else if (placed) replaceTextOnly(el, placed.value);
       }
+      if (tag === "li")
+        for (const child of el.children)
+          if (/^(ul|ol)$/i.test(child.tagName)) walkNode(child);
       return;
     }
     for (const child of el.children) walkNode(child);

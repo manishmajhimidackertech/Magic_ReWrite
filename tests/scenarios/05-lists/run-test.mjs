@@ -1,8 +1,9 @@
 // Test 05 - Bulleted / numbered list items
 //
-// The extractor prefixes bullet items with "- " (see pfx() in extractor.js)
+// The extractor prefixes bullet items with "• " (see pfx() in extractor.js)
 // so users editing/rewriting the plain-text extraction can see list
-// structure. When writing back to the docx, patchDocumentXml must strip
+// structure. The fixture's revision still uses "- ", which a rewriter may
+// hand back too. When writing back to the docx, patchDocumentXml must strip
 // that synthetic prefix back off - and it also needs to tolerate a user
 // accidentally typing a NUMBERED prefix ("1. ") on what is actually a
 // bulleted list item, since the numbering itself lives in <w:numPr> (Word

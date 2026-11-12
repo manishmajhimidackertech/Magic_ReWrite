@@ -34,6 +34,10 @@ text that will be revised, split into canvases, each with a copy button and a
 word count. The badges above them say what was left out: headings stripped,
 tables decomposed, citations held.
 
+List items start with `•`, or with their number in a numbered list. A
+bullet, a hyphen or a number the rewriter leaves on a list item is not
+written into the document; Word draws the bullet itself.
+
 - **Paid / Free** sets the canvas size: at most 5,000 words (Paid, the
   default) or 1,000 (Free). Whole sections are kept together where they fit;
   a section longer than the limit is divided between paragraphs.
@@ -44,8 +48,15 @@ the Revise tab again, since a revision pasted against the old canvases no
 longer lines up with the new ones.
 
 **Revise tab.** Paste the revised text for each canvas into the matching
-canvas on the left. The preview on the right updates as you paste, replacing
-only the paragraphs it can match, so a half-finished revision previews
+canvas on the left. Every line on the File tab remembers the paragraph it
+was copied from, so when a canvas comes back with the same number of lines
+it went out with, each line goes straight back to its own paragraph, however
+heavily it was reworded. The canvas header says which happened: *placed line
+by line*, or *matched by wording* when the line count differs (a merged or
+split paragraph, a line the rewriter added) and the lines are matched to
+paragraphs by the words they share instead. Blank lines do not count, so a
+rewriter that puts a blank line between every paragraph is fine. The preview
+on the right updates as you paste, so a half-finished revision previews
 correctly. **Download .docx** is enabled once every canvas has text, and
 saves `<name>_revised.docx`. **Re-combine** merges several canvases into one
 for a final read-through.
@@ -102,8 +113,23 @@ canvases up to the word limit. A section over the limit is cut at the
 coarsest boundary that brings each piece under it. A single paragraph over
 the limit stays whole.
 
-**Matching** (`alignment.js`). The pasted text is cut at blank lines and each
-piece is matched to a section of the extracted text. Exact matches first;
+**Locations** (`extractor.js`). Each extracted line is recorded with the
+paragraph it came from: its text as `matchKey()` reads it, and how many
+paragraphs before it had the same text. The writer and the preview count
+paragraphs the same way as they walk the document, so they find a line's
+paragraph by that location, without looking at the revised wording. A body
+paragraph left out because a table cell repeats its text is given to that
+table line.
+
+**Placing** (`placement.js`). A canvas whose pasted text has as many
+non-blank lines as it was copied with is placed by position: line *i* goes
+to the paragraph of line *i*. Table lines take a slot but are never written.
+Canvases whose count differs are matched by wording, together with any
+canvases left empty, so text pasted into the wrong canvas is still found.
+
+**Matching by wording** (`alignment.js`), the fallback. The pasted text is
+cut at blank lines and each piece is matched to a section of the extracted
+text. Exact matches first;
 then every remaining pair is scored by word overlap (Jaccard similarity over
 words of three or more letters, in any script) and assigned best score first,
 so the order pieces are pasted in does not matter. A piece that matches
@@ -116,15 +142,15 @@ the counts agree and by word overlap when they do not.
 Every lookup from a document paragraph to an extracted line goes through
 `matchKey()`: citations removed, spacing collapsed, lower case. The writer
 reads a paragraph's text the way mammoth does, with entities decoded and
-breaks as spaces, so both sides compare the same thing.
+breaks as spaces, so both sides count the same paragraphs.
 
 **Writing** (`docx-writer.js`). JSZip opens the original file, each
-`<w:p>` in `word/document.xml` is looked up as above, and matched paragraphs
+`<w:p>` in `word/document.xml` is located as above, and placed paragraphs
 are rewritten as described in the previous section. A paragraph that is not
 one balanced `<w:p>` element, such as one containing a text box, is left
 untouched rather than rewritten.
 
-**Preview** (`preview.js`). The same matching, applied to mammoth's HTML:
+**Preview** (`preview.js`). The same placement, applied to mammoth's HTML:
 text nodes are replaced and element nodes (bold, links, footnote markers) are
 kept.
 
@@ -134,10 +160,14 @@ kept.
   sentence with the same index. If the rewrite splits a sentence, it may land
   on the wrong clause; if it merges sentences, the merged one keeps all of
   them. Nothing is dropped, but read the citations after a heavy rewrite.
-- **Very short paragraphs** (fewer than three words of three letters or
-  more) may not match, and are then left as they were.
-- **Languages written without spaces** (Chinese, Japanese, Thai) match poorly,
-  because a whole sentence counts as one word.
+- **Placing by position trusts the order.** If a rewriter reorders lines but
+  keeps their number, each line still goes to the paragraph in its position.
+  Keep one line per line copied, in the same order.
+- **When matched by wording** (the line count differs), very short
+  paragraphs (fewer than three words of three letters or more) may not
+  match and are then left as they were, and languages written without
+  spaces (Chinese, Japanese, Thai) match poorly, because a whole sentence
+  counts as one word.
 - **Paragraphs holding a text box** are not revised.
 - **Soft line breaks** (Shift+Enter) inside a revised paragraph are not
   kept: the new text is a single run. They are read as spaces, so the words
@@ -184,7 +214,8 @@ js/modules/
   extractor.js        body-text extraction, canvas splitting
   citations.js        citation stripping and restoring
   constants.js        style lists, reference-heading patterns, word limits
-  alignment.js        matching revised text to extracted text
+  placement.js        placing revised lines by position, or by wording
+  alignment.js        matching revised text to extracted text by wording
   preview.js          the live preview
   docx-writer.js      writing the revision into document.xml
   canvases.js         the canvases on both tabs

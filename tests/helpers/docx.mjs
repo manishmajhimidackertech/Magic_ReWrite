@@ -111,18 +111,28 @@ export const paragraphsOf = (revised) =>
     .map((p) => p.trim())
     .filter(Boolean);
 
+/** Where the pasted text goes when it is all pasted into one canvas (or a
+ *  list of texts, one per canvas, into the canvases `split` gives). */
+export function placementsOf(mods, doc, revised, canvases = [doc.out]) {
+  const texts = Array.isArray(revised) ? revised : [revised];
+  const lines = mods.extractor.linesPerCanvas(canvases, doc.lines);
+  return mods.placement.placeRevision(lines, texts).placements;
+}
+
 /** What the Download button writes: the patched document.xml, whether it
  *  parses, and the document's text as mammoth reads it back. */
 export async function download(mods, doc, revised) {
   const zip = await JSZip.loadAsync(doc.buf);
   const inputXml = await zip.file("word/document.xml").async("string");
-  const xml = mods.writer.patchDocumentXml(
-    inputXml,
-    doc.out,
-    paragraphsOf(revised),
-    doc.calloutKeys,
-    doc.citationIndex,
-  );
+  const xml = mods.placement
+    ? mods.writer.patchDocumentXml(inputXml, placementsOf(mods, doc, revised))
+    : mods.writer.patchDocumentXml(
+        inputXml,
+        doc.out,
+        paragraphsOf(revised),
+        doc.calloutKeys,
+        doc.citationIndex,
+      );
   const errors = xmlErrors(xml);
   zip.file("word/document.xml", xml);
   let outText = null;
@@ -135,13 +145,15 @@ export async function download(mods, doc, revised) {
 
 /** What the Revise tab's live preview shows, as plain text. */
 export function preview(mods, doc, revised) {
-  const { html } = mods.preview.buildRevisedHtml(
-    doc.html,
-    paragraphsOf(revised),
-    doc.out,
-    doc.calloutKeys,
-    doc.citationIndex,
-  );
+  const { html } = mods.placement
+    ? mods.preview.buildRevisedHtml(doc.html, placementsOf(mods, doc, revised))
+    : mods.preview.buildRevisedHtml(
+        doc.html,
+        paragraphsOf(revised),
+        doc.out,
+        doc.calloutKeys,
+        doc.citationIndex,
+      );
   const el = new DOMParser().parseFromString(html, "text/html").body;
   return el.textContent;
 }
