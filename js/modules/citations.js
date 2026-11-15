@@ -23,8 +23,13 @@
    parentheticals ending in a year out of the net - the "2," in "(Schedule 2,
    to be in force from 10 June 2025)" stops the match dead, which is what
    should happen. Requiring a capital first letter is deliberate too, so
-   "(see Smith 2020)" is left whole rather than half-stripped. */
-const CITE_UNIT = "[A-Z][A-Za-z\\s,&.'\\u2019-]*?\\s\\d{4}[a-z]?";
+   "(see Smith 2020)" is left whole rather than half-stripped.
+
+   Letters are letters of any script: an ASCII-only author let "(Gutiérrez-
+   Broncano et al., 2024)" through to the rewriter with the prose around it.
+   "?" and "!" are there for names that carry one - "(Which?, 2024)". */
+const CITE_UNIT =
+  "\\p{Lu}[\\p{L}\\p{M}\\s,&.'\\u2019?!-]*?\\s\\d{4}[a-z]?";
 
 /* Numeric styles - "[1]", "[1,2]", "[1-3]". Capped at three digits so a law
    report year keeps its brackets: "ASIC v RI Advice Group Pty Ltd [2022] FCA
@@ -35,7 +40,8 @@ const CITE_NUM = "\\[\\d{1,3}(?:\\s*[,\\-\\u2013]\\s*\\d{1,3})*\\]";
 export const CITAT =
   "(\\(" + CITE_UNIT + "(?:\\s*;\\s*" + CITE_UNIT + ")*\\)|" + CITE_NUM + ")";
 
-export const citationRe = () => new RegExp(CITAT, "g");
+/** CITAT is written for the "u" flag: its author part uses \p{…}. */
+export const citationRe = () => new RegExp(CITAT, "gu");
 
 /** Collapse the gap a removed citation leaves behind, including the space
  *  that would otherwise be stranded before the sentence's full stop. */
