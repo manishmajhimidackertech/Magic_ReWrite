@@ -1,13 +1,15 @@
 "use strict";
 
-import { gtxt, bFlag, tVals } from "./mammoth-helpers.js";
-import { processElements } from "./extractor.js";
+import { collectElems } from "./mammoth-helpers.js";
+import { HIGHLIGHT_STYLE_MAP } from "./highlight.js";
+import { processElements, processHighlights } from "./extractor.js";
 import { state } from "./state.js";
 import {
   showLoad,
   hideLoad,
   setTitle,
   showBadges,
+  showNotice,
   setLpWords,
   docHTML,
   docNotesPage,
@@ -27,29 +29,6 @@ import { splitNoteList, renderNotesPage } from "./footnotes.js";
   ═══════════════════════════════════════════════ */
 
 /**
- * Build the mammoth transformDocument callback that populates `elems`.
- * Extracted so it can be shared between processFile and re-extract.
- */
-function buildTransform(elems) {
-  return (doc) => {
-    for (const ch of doc.children || []) {
-      if (ch.type === "paragraph")
-        elems.push({
-          type: "p",
-          st: ch.styleName || ch.styleId || "Normal",
-          raw: gtxt(ch).trim(),
-          bold: bFlag(ch),
-          isList: !!ch.numbering,
-          ni: ch.numbering?.numId ?? null,
-          lv: ch.numbering?.level ?? 0,
-        });
-      else if (ch.type === "table") elems.push({ type: "t", v: tVals(ch) });
-    }
-    return doc;
-  };
-}
-
-/**
  * Load a .docx File, render it via mammoth, extract body text,
  * and populate all relevant state + DOM.
  */
@@ -64,7 +43,9 @@ export async function processFile(file) {
     showLoad("Rendering document…");
     const { value: html } = await mammoth.convertToHtml(
       { arrayBuffer: buf },
-      { transformDocument: buildTransform(elems) },
+      // Highlighting is kept, as <mark>: the preview finds a highlighted
+      // passage by it.
+      { transformDocument: collectElems(elems), styleMap: HIGHLIGHT_STYLE_MAP },
     );
     // Only now is this the open document. Setting it before mammoth had
     // read the file left a file that could not be read as the one Download
@@ -135,24 +116,29 @@ export async function processFile(file) {
 }
 
 /* ═══════════════════════════════════════════════
-     RE-EXTRACT
+     EXTRACT HIGHLIGHTED
   ═══════════════════════════════════════════════ */
 
 /**
- * Re-run mammoth extraction on the already-loaded file (e.g. after an
- * editing session has dirtied the canvases).
+ * Read the open file again and extract only its highlighted text, in place
+ * of whatever the canvases hold. A document with nothing highlighted keeps
+ * the extraction it has, and says so.
  */
-export async function reExtract() {
+export async function extractHighlighted() {
   if (!state.curFile) return;
-  showLoad("Re-extracting…");
+  showLoad("Extracting highlighted text…");
   try {
     const buf = await state.curFile.arrayBuffer();
     const elems = [];
     await mammoth.convertToHtml(
       { arrayBuffer: buf },
-      { transformDocument: buildTransform(elems) },
+      { transformDocument: collectElems(elems) },
     );
-    const { out, lines, pills, nW } = processElements(elems);
+    const { out, lines, pills, nW } = processHighlights(elems);
+    if (!lines.length) {
+      showNotice("No highlighted text found in this document");
+      return;
+    }
     state.curExtracted = out;
     state.lines = lines;
     showBadges(pills, nW);

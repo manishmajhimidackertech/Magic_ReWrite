@@ -943,6 +943,14 @@ body {
   background: #fff3d9;
   color: #8a5a00;
 }
+.bd-h {
+  background: #fef9c3;
+  color: #854d0e;
+}
+.bd-notice {
+  background: #fee2e2;
+  color: #991b1b;
+}
 .rp-body {
   flex: 1;
   overflow: hidden;

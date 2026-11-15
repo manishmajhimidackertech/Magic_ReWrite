@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import { download, open } from "./helpers/docx.mjs";
+import { buildDocx, download, open, para, run, text } from "./helpers/docx.mjs";
 import { ROOT, loadModules } from "./helpers/roots.mjs";
 
 const fixture = (f) => fs.readFileSync(path.join(ROOT, "tests/scenarios", f));
@@ -93,7 +93,14 @@ export const appCases = [
     name: "Extract Highlighted on the File tab after pasting leaves the Revise tab matching what is stored",
     regression: true,
     async run(app) {
-      await app.open(LISTS, "lists.docx");
+      // The button extracts again only when there is highlighted text to
+      // extract, so the document has some.
+      const HL = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';
+      const buf = await buildDocx(
+        para(run("A plain opening sentence. ") + run("A highlighted sentence to revise.", HL)) +
+          text("A second paragraph with nothing highlighted in it at all."),
+      );
+      await app.open(buf, "highlighted.docx");
       app.click("insertTab");
       app.paste(0, "A revision that Extract Highlighted is about to discard.");
       app.click("fileTab");

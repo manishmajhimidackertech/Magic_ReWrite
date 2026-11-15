@@ -8,7 +8,7 @@ export const openBtn         = document.getElementById("openBtn");
 export const ovOpenBtn       = document.getElementById("ovOpenBtn");
 export const reextBtn        = document.getElementById("reextBtn");
 export const closeBtn        = document.getElementById("closeBtn");
-export const recombineBtn    = document.getElementById("recombineBtn");
+export const refreshBtn      = document.getElementById("refreshBtn");
 export const closeBtnInsert  = document.getElementById("closeBtnInsert");
 export const freeAcctBtn     = document.getElementById("freeAcctBtn");
 export const paidAcctBtn     = document.getElementById("paidAcctBtn");
@@ -83,6 +83,17 @@ export function showBadges(pills, nW) {
     .map((p) => `<span class="badge ${p.cls}">${p.label}</span>`)
     .join("");
   rpTitle.textContent = `Extracted Text - ${nW.toLocaleString()} words`;
+}
+
+/** Say something beside the badges for a few seconds, without disturbing
+ *  them. */
+export function showNotice(msg) {
+  rpBadges.querySelector(".bd-notice")?.remove();
+  const el = document.createElement("span");
+  el.className = "badge bd-notice";
+  el.textContent = msg;
+  rpBadges.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
 }
 
 export function setLpWords(count) {

@@ -1,5 +1,7 @@
 "use strict";
 
+import { groupHighlighted } from "./highlight.js";
+
 /* ═══════════════════════════════════════════════
      MAMMOTH HELPERS
      Utilities for walking the mammoth AST and
@@ -45,4 +47,41 @@ export function tVals(t) {
         .join(" "),
     ),
   );
+}
+
+/** Every run in a paragraph, in order, wherever it sits (a hyperlink holds
+ *  its runs one level down). */
+function runPieces(el, out) {
+  if (el.type === "run") out.push({ text: gtxt(el), hl: !!el.highlight });
+  else for (const c of el.children || []) runPieces(c, out);
+  return out;
+}
+
+/** The text of each highlighted passage in a paragraph. */
+export const hlSpans = (p) =>
+  groupHighlighted(runPieces(p, [])).map((s) => s.text);
+
+/**
+ * The mammoth transformDocument callback that fills `elems` with one
+ * descriptor per body paragraph and table, which is what the extractor
+ * works from.
+ */
+export function collectElems(elems) {
+  return (doc) => {
+    for (const ch of doc.children || []) {
+      if (ch.type === "paragraph")
+        elems.push({
+          type: "p",
+          st: ch.styleName || ch.styleId || "Normal",
+          raw: gtxt(ch).trim(),
+          bold: bFlag(ch),
+          isList: !!ch.numbering,
+          ni: ch.numbering?.numId ?? null,
+          lv: ch.numbering?.level ?? 0,
+          spans: hlSpans(ch),
+        });
+      else if (ch.type === "table") elems.push({ type: "t", v: tVals(ch) });
+    }
+    return doc;
+  };
 }

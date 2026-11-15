@@ -16,5 +16,7 @@ export const state = {
   isPaidAccount: true,        // paid (default) vs free - controls canvas size
   canvasTexts:   [],          // extracted text per canvas
   canvasLines:   [],          // the line records in each canvas (parallel)
+  baseCanvasLines: [],        // those records as extracted, before any refresh
+  copiedTexts:   [],          // each canvas's text as it was last copied, or null
   revisedTexts: [],         // revised text per canvas (parallel)
 };
