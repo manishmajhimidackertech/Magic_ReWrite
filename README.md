@@ -41,7 +41,7 @@ written into the document; Word draws the bullet itself.
 - **Paid / Free** sets the canvas size: at most 5,000 words (Paid, the
   default) or 1,000 (Free). Whole sections are kept together where they fit;
   a section longer than the limit is divided between paragraphs.
-- **Re-extract** reads the file again, discarding edits made to the canvases.
+- **Extract Highlighted** reads the file again, discarding edits made to the canvases.
 
 Changing the canvas size, re-extracting or opening another document starts
 the Revise tab again, since a revision pasted against the old canvases no
@@ -51,10 +51,9 @@ longer lines up with the new ones.
 canvas on the left. Every line on the File tab remembers the paragraph it
 was copied from, so when a canvas comes back with the same number of lines
 it went out with, each line goes straight back to its own paragraph, however
-heavily it was reworded. The canvas header says which happened: *placed line
-by line*, or *matched by wording* when the line count differs (a merged or
-split paragraph, a line the rewriter added) and the lines are matched to
-paragraphs by the words they share instead. Blank lines do not count, so a
+heavily it was reworded. When the line count differs (a merged or split
+paragraph, a line the rewriter added) the lines are matched to paragraphs by
+the words they share instead. Blank lines do not count, so a
 rewriter that puts a blank line between every paragraph is fine. The preview
 on the right updates as you paste, so a half-finished revision previews
 correctly. **Download .docx** is enabled once every canvas has text, and

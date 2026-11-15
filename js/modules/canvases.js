@@ -87,26 +87,19 @@ export function renderInsertCanvases() {
 
   for (let idx = 0; idx < count; idx++) {
     const label = count > 1 ? `Part ${idx + 1} of ${count}` : "Revised Text";
-    addInsertCanvas(idx, label, `⌘+V / Ctrl+V - Paste revised text for ${label}…`);
+    addInsertCanvas(idx, `⌘+V / Ctrl+V - Paste revised text for ${label}…`);
   }
-  updateCanvasStatus();
 }
 
-/** One paste canvas on the Revise tab, with a header holding its label and
- *  how its text is being placed. */
-export function addInsertCanvas(idx, label, placeholder, text = "") {
+/** One paste canvas on the Revise tab. */
+export function addInsertCanvas(idx, placeholder, text = "") {
   const wrap = document.createElement("div");
   wrap.className = "hum-canvas-wrap";
   wrap.innerHTML = `
-    <div class="hum-canvas-header">
-      <span class="hum-canvas-label"></span>
-      <span class="hum-canvas-status"></span>
-    </div>
     <div class="humanized-page${text ? "" : " waiting"}">
       <div class="humanized-content" contenteditable="true" spellcheck="false"
            data-idx="${idx}"></div>
     </div>`;
-  wrap.querySelector(".hum-canvas-label").textContent = label;
   revisedWS.appendChild(wrap);
   const el = wrap.querySelector(".humanized-content");
   el.dataset.ph = placeholder;
@@ -125,35 +118,6 @@ export function onRevisedInput(idx, el, wrap) {
   page.classList.toggle("waiting", !text.trim());
   updateRevisedWords();
   updateRevisedPreview();
-}
-
-const countWords = (t) => (t || "").split(/\s+/).filter(Boolean).length;
-const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
-
-/** Say, on each paste canvas, whether its text goes back line by line or
- *  has to be matched by wording because its line count differs. */
-function updateCanvasStatus(status = []) {
-  const els = revisedWS.querySelectorAll(".hum-canvas-status");
-  els.forEach((el, k) => {
-    const st = status[k] || { mode: "empty" };
-    const words = countWords(state.revisedTexts[k]);
-    el.removeAttribute("title");
-    if (st.mode === "position") {
-      el.textContent = `${plural(words, "word")} · placed line by line`;
-      el.className = "hum-canvas-status filled";
-    } else if (st.mode === "wording") {
-      el.textContent = `${st.got} of ${plural(st.expected, "line")} · matched by wording`;
-      el.className = "hum-canvas-status partial";
-      el.title =
-        `This part has ${plural(st.got, "line")} but was copied as ` +
-        `${plural(st.expected, "line")}, so its lines are matched to the ` +
-        "document by their wording. With one line for each line copied, " +
-        "every line goes back exactly where it came from.";
-    } else {
-      el.textContent = `~${plural(countWords(state.canvasTexts[k]), "word")} expected`;
-      el.className = "hum-canvas-status";
-    }
-  });
 }
 
 export function updateRevisedWords() {
@@ -176,11 +140,7 @@ export function updateRevisedWords() {
 export function updateRevisedPreview() {
   // The same placement the download handler writes, so the preview shows
   // exactly what the file will contain.
-  const { placements, status } = placeRevision(
-    state.canvasLines,
-    state.revisedTexts,
-  );
-  updateCanvasStatus(status);
+  const { placements } = placeRevision(state.canvasLines, state.revisedTexts);
 
   const filledCount = state.revisedTexts.filter(
     (t) => t.trim().length > 0,

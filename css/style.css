@@ -1217,37 +1217,6 @@ body {
   max-width: 540px;
   flex-shrink: 0;
 }
-.hum-canvas-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #1e3a4a;
-  border: 1px solid #2c5570;
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
-  padding: 5px 10px 5px 12px;
-  gap: 8px;
-}
-.hum-canvas-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.75);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.hum-canvas-status {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  flex: 1;
-  text-align: right;
-}
-.hum-canvas-status.filled {
-  color: #4ade80;
-}
-.hum-canvas-status.partial {
-  color: #fbbf24;
-}
-
 .humanized-page {
   background: var(--sw-card);
   min-height: 200px;

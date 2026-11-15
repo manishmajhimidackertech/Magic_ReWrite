@@ -156,7 +156,7 @@ recombineBtn.addEventListener("click", async () => {
   state.revisedTexts = [combined];
   recombineBtn.disabled = true;
 
-  addInsertCanvas(0, "Revised Text", "All revised text combined here…", combined);
+  addInsertCanvas(0, "All revised text combined here…", combined);
 
   updateRevisedWords();
   updateRevisedPreview();
