@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import { download, open } from "./helpers/docx.mjs";
+import { buildDocx, download, open, para, run, text } from "./helpers/docx.mjs";
 import { ROOT, loadModules } from "./helpers/roots.mjs";
 
 const fixture = (f) => fs.readFileSync(path.join(ROOT, "tests/scenarios", f));
@@ -90,12 +90,19 @@ export const appCases = [
     },
   },
   {
-    name: "Re-extract on the File tab after pasting leaves the Revise tab matching what is stored",
+    name: "Extract Highlighted on the File tab after pasting leaves the Revise tab matching what is stored",
     regression: true,
     async run(app) {
-      await app.open(LISTS, "lists.docx");
+      // The button extracts again only when there is highlighted text to
+      // extract, so the document has some.
+      const HL = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';
+      const buf = await buildDocx(
+        para(run("A plain opening sentence. ") + run("A highlighted sentence to revise.", HL)) +
+          text("A second paragraph with nothing highlighted in it at all."),
+      );
+      await app.open(buf, "highlighted.docx");
       app.click("insertTab");
-      app.paste(0, "A revision that Re-extract is about to discard.");
+      app.paste(0, "A revision that Extract Highlighted is about to discard.");
       app.click("fileTab");
       app.click("reextBtn");
       await new Promise((r) => setTimeout(r, 50));
@@ -142,21 +149,6 @@ export const appCases = [
       assert.equal(app.$("tbTitle").textContent, "Magic ReWrite");
       app.click("insertTab");
       assert.equal(app.state.insertMode, false, "the Revise tab stays shut with no document");
-    },
-  },
-  {
-    name: "each paste canvas says whether its text goes back line by line or is matched by wording",
-    regression: true,
-    async run(app) {
-      await app.open(LISTS, "lists.docx");
-      app.click("insertTab");
-      const status = () => app.$("humanizedWS").querySelector(".hum-canvas-status").textContent;
-      assert.match(status(), /expected/);
-      const lines = app.state.canvasTexts[0].split("\n").filter((l) => l.trim());
-      app.paste(0, lines.map((l) => "Revised " + l).join("\n"));
-      assert.match(status(), /placed line by line/);
-      app.paste(0, lines.slice(1).map((l) => "Revised " + l).join("\n"));
-      assert.match(status(), new RegExp(`${lines.length - 1} of ${lines.length} lines · matched by wording`));
     },
   },
 ];

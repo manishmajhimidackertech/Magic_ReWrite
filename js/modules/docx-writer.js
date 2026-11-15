@@ -2,6 +2,7 @@
 
 import { matchKey } from "./alignment.js";
 import { locationOf } from "./placement.js";
+import { groupHighlighted, edgeSpace } from "./highlight.js";
 
 /* ═══════════════════════════════════════════════
      DOCX WRITER
@@ -159,6 +160,58 @@ function scanRuns(paraBlock) {
   return runs;
 }
 
+/** Whether a run carries highlighting of its own, as mammoth reads it:
+ *  <w:highlight> in its run properties with a colour other than "none". */
+function isHighlighted(runXml) {
+  const rPr = runXml.match(/<w:rPr[\s>][\s\S]*?<\/w:rPr>/);
+  const m = rPr && rPr[0].match(/<w:highlight\b[^>]*\bw:val="([^"]*)"/);
+  return !!m && m[1] !== "none";
+}
+
+/**
+ * Replace highlighted passages of one paragraph, leaving the rest of it
+ * exactly as it is. Each passage's text runs are removed and its revision
+ * goes in as one run where the first of them was, with that run's
+ * formatting - so it is still highlighted, and still inside the hyperlink
+ * or tracked change the passage began in.
+ *
+ * @param {string} paraBlock
+ * @param {Map<number, string>} spans - passage number → revised text
+ */
+function patchSpans(paraBlock, spans) {
+  const runs = scanRuns(paraBlock);
+  if (!runs) return paraBlock;
+  const found = groupHighlighted(
+    runs.map((r) => ({ text: paragraphText(r.xml), hl: isHighlighted(r.xml) })),
+  );
+  const edits = [];
+  for (const [idx, value] of spans) {
+    const span = found[idx];
+    if (!span) continue;
+    const textRuns = runs
+      .slice(span.from, span.to + 1)
+      .filter((r) => /<w:t[\s>]/.test(r.xml));
+    if (!textRuns.length) continue;
+    const first = textRuns[0];
+    const styleRun = textRuns.find((r) => isHighlighted(r.xml)) || first;
+    const rPrMatch = styleRun.xml.match(/<w:rPr[\s>][\s\S]*?<\/w:rPr>/);
+    const { lead, trail } = edgeSpace(span.text);
+    const text = xmlEsc(lead + normalizeTypography(value) + trail);
+    edits.push({
+      start: first.start,
+      end: first.end,
+      xml: `<w:r>${rPrMatch ? rPrMatch[0] : ""}<w:t xml:space="preserve">${text}</w:t></w:r>`,
+    });
+    for (const r of textRuns.slice(1))
+      edits.push({ start: r.start, end: r.end, xml: "" });
+  }
+  // Last first, so the offsets of the edits still to make stay true.
+  edits.sort((a, b) => b.start - a.start);
+  let out = paraBlock;
+  for (const e of edits) out = out.slice(0, e.start) + e.xml + out.slice(e.end);
+  return out;
+}
+
 /**
  * Perform XML surgery on word/document.xml: replace paragraph text runs with
  * revised replacements while preserving footnotes, rPr formatting, and
@@ -226,6 +279,8 @@ export function patchDocumentXml(rawXml, placements) {
         )
       )
         return paraBlock;
+
+      if (placed.spans) return patchSpans(paraBlock, placed.spans);
 
       const resolvedClean = normalizeTypography(placed.value);
       const newText = xmlEsc(resolvedClean);

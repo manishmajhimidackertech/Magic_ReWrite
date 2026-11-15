@@ -2,6 +2,7 @@
 
 import { matchKey } from "./alignment.js";
 import { locationOf } from "./placement.js";
+import { groupHighlighted, edgeSpace } from "./highlight.js";
 
 /* ═══════════════════════════════════════════════
      LIVE PARTIAL PREVIEW
@@ -51,6 +52,26 @@ export function replaceTextOnly(el, newText) {
   }
   tnodes[0].nodeValue = newText;
   for (let i = 1; i < tnodes.length; i++) tnodes[i].nodeValue = "";
+}
+
+/** Replace highlighted passages of a paragraph - the text mammoth put inside
+ *  <mark> - leaving the rest of the paragraph as it is.
+ *  @param {Map<number, string>} spans - passage number → revised text */
+function replaceSpans(el, spans) {
+  const nodes = collectTextNodes(el, []);
+  const found = groupHighlighted(
+    nodes.map((n) => ({
+      text: n.nodeValue,
+      hl: !!(n.parentElement && n.parentElement.closest("mark")),
+    })),
+  );
+  for (const [idx, value] of spans) {
+    const span = found[idx];
+    if (!span) continue;
+    const { lead, trail } = edgeSpace(span.text);
+    nodes[span.from].nodeValue = lead + value + trail;
+    for (let i = span.from + 1; i <= span.to; i++) nodes[i].nodeValue = "";
+  }
 }
 
 /**
@@ -103,7 +124,8 @@ export function buildRevisedHtml(originalHtml, placements) {
         seen.set(key, occ + 1);
         const placed =
           tag[0] === "h" ? null : placements.get(locationOf(key, occ));
-        if (placed && placed.label)
+        if (placed && placed.spans) replaceSpans(el, placed.spans);
+        else if (placed && placed.label)
           el.innerHTML = `<strong>${esc(placed.label)}:</strong> ${esc(placed.value)}`;
         else if (placed) replaceTextOnly(el, placed.value);
       }

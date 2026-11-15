@@ -7,7 +7,7 @@ import {
   ovOpenBtn,
   reextBtn,
   closeBtn,
-  recombineBtn,
+  refreshBtn,
   closeBtnInsert,
   freeAcctBtn,
   paidAcctBtn,
@@ -51,12 +51,10 @@ import {
 import {
   renderExtractedCanvases,
   renderInsertCanvases,
-  addInsertCanvas,
-  updateRevisedPreview,
-  updateRevisedWords,
+  refreshLocations,
 } from "./modules/canvases.js";
 import { placeRevision } from "./modules/placement.js";
-import { processFile, reExtract } from "./modules/file-processor.js";
+import { processFile, extractHighlighted } from "./modules/file-processor.js";
 import { renderNotesPage } from "./modules/footnotes.js";
 import { loadScript, patchDocumentXml } from "./modules/docx-writer.js";
 
@@ -123,7 +121,6 @@ function switchToInsert() {
   fileRightPane.style.display = "none";
   insertRightPane.style.display = "flex";
   if (revisedWS.children.length === 0) renderInsertCanvases();
-  recombineBtn.disabled = state.canvasTexts.length <= 1;
   setTimeout(() => {
     const f = revisedWS.querySelector(".humanized-content");
     if (f) f.focus();
@@ -140,26 +137,19 @@ insertTab.addEventListener("click", () => {
 });
 
 /* ═══════════════════════════════════════════════
-     RE-COMBINE
+     REFRESH LOCATIONS
   ═══════════════════════════════════════════════ */
-recombineBtn.addEventListener("click", async () => {
-  if (!state.revisedTexts.length) return;
-  const combined = state.revisedTexts.filter((t) => t.trim()).join("\n\n\n\n");
-  if (!combined) return;
-
-  revisedWS.innerHTML = "";
-  state.canvasTexts = [state.curExtracted];
-  // The line records go along. Text from a canvas left empty is missing
-  // from the combined text, so its line count then differs and the
-  // combined canvas is matched by wording instead.
-  state.canvasLines = [state.canvasLines.flat()];
-  state.revisedTexts = [combined];
-  recombineBtn.disabled = true;
-
-  addInsertCanvas(0, "Revised Text", "All revised text combined here…", combined);
-
-  updateRevisedWords();
-  updateRevisedPreview();
+const refreshLabel = refreshBtn.querySelector(".st");
+const refreshLabelHtml = refreshLabel.innerHTML;
+let refreshLabelTimer = 0;
+refreshBtn.addEventListener("click", () => {
+  if (!state.curFile) return;
+  refreshLocations();
+  refreshLabel.textContent = "✓ Refreshed";
+  clearTimeout(refreshLabelTimer);
+  refreshLabelTimer = setTimeout(() => {
+    refreshLabel.innerHTML = refreshLabelHtml;
+  }, 1500);
 });
 
 /* ═══════════════════════════════════════════════
@@ -170,6 +160,8 @@ function doClose() {
   state.curExtracted = "";
   state.lines = [];
   state.canvasLines = [];
+  state.baseCanvasLines = [];
+  state.copiedTexts = [];
   state.originalDocHtml = "";
   state.docNotesHtml = "";
   state.canvasTexts = [];
@@ -192,7 +184,7 @@ function doClose() {
   rpBadges.innerHTML = "";
 
   [reextBtn, closeBtn].forEach((b) => (b.disabled = true));
-  recombineBtn.disabled = true;
+  refreshBtn.disabled = true;
   downloadBtn.disabled = true;
   fileInp.value = "";
   insertTab.classList.remove("ready", "active-insert");
@@ -203,9 +195,9 @@ closeBtn.onclick = doClose;
 closeBtnInsert.addEventListener("click", doClose);
 
 /* ═══════════════════════════════════════════════
-     RE-EXTRACT
+     EXTRACT HIGHLIGHTED
   ═══════════════════════════════════════════════ */
-reextBtn.onclick = () => reExtract();
+reextBtn.onclick = () => extractHighlighted();
 
 /* ═══════════════════════════════════════════════
      DOWNLOAD REVISED DOCX

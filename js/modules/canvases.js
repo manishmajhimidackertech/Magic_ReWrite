@@ -9,14 +9,14 @@ import {
   revisedDocNotesPage,
   revisedDocNotesHtml,
   downloadBtn,
-  recombineBtn,
+  refreshBtn,
   insertRpSub,
   doCopy,
 } from "./ui.js";
 import { buildRevisedHtml } from "./preview.js";
 import { renderNotesPage } from "./footnotes.js";
 import { splitIntoCanvases, linesPerCanvas } from "./extractor.js";
-import { placeRevision } from "./placement.js";
+import { placeRevision, relocate } from "./placement.js";
 import { FREE_WORD_LIMIT, PAID_WORD_LIMIT } from "./constants.js";
 import { state } from "./state.js";
 
@@ -33,7 +33,17 @@ export function renderExtractedCanvases() {
   // wall of text with no word count and no way to work through it in pieces.
   const limit = state.isPaidAccount ? PAID_WORD_LIMIT : FREE_WORD_LIMIT;
   state.canvasTexts = splitIntoCanvases(state.curExtracted, limit);
-  state.canvasLines = linesPerCanvas(state.canvasTexts, state.lines);
+  // The text may have been edited on a canvas since it was extracted, so
+  // the records are brought into step with it before being dealt out.
+  // Dealing out the extracted records as they stood gave every line after
+  // a deleted one the location of the line before it.
+  state.canvasLines = linesPerCanvas(
+    state.canvasTexts,
+    relocate(state.lines, state.curExtracted),
+  );
+  // New canvases: nothing has been copied from them yet.
+  state.baseCanvasLines = state.canvasLines;
+  state.copiedTexts = state.canvasTexts.map(() => null);
   state.canvasTexts.forEach((chunk, idx) => {
     const wc = chunk.split(/\s+/).filter(Boolean).length;
     const label =
@@ -55,9 +65,19 @@ export function renderExtractedCanvases() {
     el.textContent = chunk;
     el.addEventListener("input", onExtractedEdit);
     const copyBtn = wrap.querySelector(".rp-copy-btn");
-    copyBtn.addEventListener("click", () =>
-      doCopy(el.innerText || chunk, copyBtn, COPY_SVG),
-    );
+    copyBtn.addEventListener("click", () => {
+      const text = el.innerText || chunk;
+      noteCopied(idx, text);
+      doCopy(text, copyBtn, COPY_SVG);
+    });
+    // Ctrl+C, or Copy from the menu. Only a copy of the whole canvas is
+    // remembered: a word or a sentence copied out of it says nothing about
+    // what is going to be pasted back.
+    el.addEventListener("copy", () => {
+      const sel = String(window.getSelection() || "");
+      const whole = el.innerText || "";
+      if (sameLines(sel, whole)) noteCopied(idx, whole);
+    });
   });
   // New canvases mean the revision no longer lines up with them, so the
   // Revise tab starts again too - whichever tab is showing. Only rebuilding
@@ -67,7 +87,40 @@ export function renderExtractedCanvases() {
   renderInsertCanvases();
   updateRevisedWords();
   updateRevisedPreview();
-  recombineBtn.disabled = state.canvasTexts.length <= 1;
+  refreshBtn.disabled = false;
+}
+
+const lineList = (t) =>
+  String(t || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+function sameLines(a, b) {
+  const x = lineList(a),
+    y = lineList(b);
+  return x.length > 0 && x.length === y.length && x.every((l, i) => l === y[i]);
+}
+
+/** Keep canvas `idx`'s text as it left for revision, and bring the line
+ *  locations into step with it. */
+function noteCopied(idx, text) {
+  state.copiedTexts[idx] = text;
+  refreshLocations();
+}
+
+/**
+ * Rebuild where every line of every canvas goes back to, from the text that
+ * was actually sent out: the copy kept when the canvas was copied, or, for
+ * a canvas never copied, the canvas as it now reads. Whatever has been
+ * pasted on the Revise tab stays, and is placed again.
+ */
+export function refreshLocations() {
+  state.canvasLines = state.baseCanvasLines.map((base, k) =>
+    relocate(base, state.copiedTexts[k] ?? state.canvasTexts[k]),
+  );
+  updateRevisedWords();
+  updateRevisedPreview();
 }
 
 function onExtractedEdit(e) {
@@ -87,26 +140,19 @@ export function renderInsertCanvases() {
 
   for (let idx = 0; idx < count; idx++) {
     const label = count > 1 ? `Part ${idx + 1} of ${count}` : "Revised Text";
-    addInsertCanvas(idx, label, `⌘+V / Ctrl+V - Paste revised text for ${label}…`);
+    addInsertCanvas(idx, `⌘+V / Ctrl+V - Paste revised text for ${label}…`);
   }
-  updateCanvasStatus();
 }
 
-/** One paste canvas on the Revise tab, with a header holding its label and
- *  how its text is being placed. */
-export function addInsertCanvas(idx, label, placeholder, text = "") {
+/** One paste canvas on the Revise tab. */
+export function addInsertCanvas(idx, placeholder, text = "") {
   const wrap = document.createElement("div");
   wrap.className = "hum-canvas-wrap";
   wrap.innerHTML = `
-    <div class="hum-canvas-header">
-      <span class="hum-canvas-label"></span>
-      <span class="hum-canvas-status"></span>
-    </div>
     <div class="humanized-page${text ? "" : " waiting"}">
       <div class="humanized-content" contenteditable="true" spellcheck="false"
            data-idx="${idx}"></div>
     </div>`;
-  wrap.querySelector(".hum-canvas-label").textContent = label;
   revisedWS.appendChild(wrap);
   const el = wrap.querySelector(".humanized-content");
   el.dataset.ph = placeholder;
@@ -125,35 +171,6 @@ export function onRevisedInput(idx, el, wrap) {
   page.classList.toggle("waiting", !text.trim());
   updateRevisedWords();
   updateRevisedPreview();
-}
-
-const countWords = (t) => (t || "").split(/\s+/).filter(Boolean).length;
-const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
-
-/** Say, on each paste canvas, whether its text goes back line by line or
- *  has to be matched by wording because its line count differs. */
-function updateCanvasStatus(status = []) {
-  const els = revisedWS.querySelectorAll(".hum-canvas-status");
-  els.forEach((el, k) => {
-    const st = status[k] || { mode: "empty" };
-    const words = countWords(state.revisedTexts[k]);
-    el.removeAttribute("title");
-    if (st.mode === "position") {
-      el.textContent = `${plural(words, "word")} · placed line by line`;
-      el.className = "hum-canvas-status filled";
-    } else if (st.mode === "wording") {
-      el.textContent = `${st.got} of ${plural(st.expected, "line")} · matched by wording`;
-      el.className = "hum-canvas-status partial";
-      el.title =
-        `This part has ${plural(st.got, "line")} but was copied as ` +
-        `${plural(st.expected, "line")}, so its lines are matched to the ` +
-        "document by their wording. With one line for each line copied, " +
-        "every line goes back exactly where it came from.";
-    } else {
-      el.textContent = `~${plural(countWords(state.canvasTexts[k]), "word")} expected`;
-      el.className = "hum-canvas-status";
-    }
-  });
 }
 
 export function updateRevisedWords() {
@@ -176,11 +193,7 @@ export function updateRevisedWords() {
 export function updateRevisedPreview() {
   // The same placement the download handler writes, so the preview shows
   // exactly what the file will contain.
-  const { placements, status } = placeRevision(
-    state.canvasLines,
-    state.revisedTexts,
-  );
-  updateCanvasStatus(status);
+  const { placements } = placeRevision(state.canvasLines, state.revisedTexts);
 
   const filledCount = state.revisedTexts.filter(
     (t) => t.trim().length > 0,

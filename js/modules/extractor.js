@@ -334,6 +334,66 @@ export function processElements(elems) {
 }
 
 /**
+ * Extraction of the highlighted text alone: one line for each highlighted
+ * passage, and nothing else from the document.
+ *
+ * Every paragraph is still counted, exactly as processElements counts them,
+ * so a passage's paragraph is found the same way. Within it the passage is
+ * known by its number (`span`). Headings are left out, because the writer
+ * never rewrites one; so are tables, which it never writes into. Citations
+ * are held back and restored as they are for whole paragraphs, and a passage
+ * that is nothing but a citation gives no line.
+ *
+ * @param {Array} elems - from collectElems()
+ * @returns {{ out: string, lines: Array, pills: Array, nW: number }}
+ */
+export function processHighlights(elems) {
+  const seen = new Map();
+  let out = "";
+  const lines = [];
+  let newSection = false;
+  let nParas = 0;
+  let nCites = 0;
+
+  for (const e of elems) {
+    if (e.type !== "p") continue;
+    const raw = (e.raw || "").replace(/\s*\n\s*/g, " ");
+    const key = matchKey(raw);
+    if (!key) continue;
+    const occ = seen.get(key) || 0;
+    seen.set(key, occ + 1);
+    const s = nm(e.st);
+    if (SECT.has(s)) newSection = true;
+    if (SKIP.has(s)) continue;
+
+    let any = false;
+    (e.spans || []).forEach((span, i) => {
+      const { text, cites } = stripCitations(span.replace(/\s+/g, " ").trim());
+      if (!text) return;
+      const sep = !out ? "" : newSection ? "\n\n\n\n" : "\n";
+      newSection = false;
+      any = true;
+      nCites += cites.length;
+      out += sep + text;
+      lines.push({ text, sep, key, occ, span: i, cites, label: "", isList: false });
+    });
+    if (any) nParas++;
+  }
+
+  const nH = lines.length;
+  const nW = out.split(/\s+/).filter(Boolean).length;
+  const pills = [
+    { label: `${nH} highlighted passage${nH !== 1 ? "s" : ""}`, cls: "bd-h" },
+    { label: `${nParas} paragraph${nParas !== 1 ? "s" : ""}`, cls: "bd-p" },
+    nCites > 0 && {
+      label: `${nCites} citation${nCites !== 1 ? "s" : ""} held`,
+      cls: "bd-c",
+    },
+  ].filter(Boolean);
+  return { out, lines, pills, nW };
+}
+
+/**
  * The line records belonging to each canvas. Canvases are cut only between
  * lines, so walking them in order and counting their lines hands every
  * record to the canvas its line went into.

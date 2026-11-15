@@ -41,9 +41,18 @@ written into the document; Word draws the bullet itself.
 - **Paid / Free** sets the canvas size: at most 5,000 words (Paid, the
   default) or 1,000 (Free). Whole sections are kept together where they fit;
   a section longer than the limit is divided between paragraphs.
-- **Re-extract** reads the file again, discarding edits made to the canvases.
+- **Extract Highlighted** reads the file again and extracts only the text
+  highlighted in Word, one line for each highlighted passage. A passage is a
+  stretch of highlighted text within one paragraph; highlighted words with
+  only spaces between them are one passage. Only those passages are rewritten
+  when the revision comes back: the rest of each paragraph is left exactly as
+  it is, and the revised passage keeps its highlighting. Highlighted headings
+  and table text are left out, since neither is ever written to. A document
+  with nothing highlighted keeps the extraction it has. To go back to the
+  whole text, open the document again.
 
-Changing the canvas size, re-extracting or opening another document starts
+Changing the canvas size, extracting the highlighted text or opening another
+document starts
 the Revise tab again, since a revision pasted against the old canvases no
 longer lines up with the new ones.
 
@@ -51,15 +60,23 @@ longer lines up with the new ones.
 canvas on the left. Every line on the File tab remembers the paragraph it
 was copied from, so when a canvas comes back with the same number of lines
 it went out with, each line goes straight back to its own paragraph, however
-heavily it was reworded. The canvas header says which happened: *placed line
-by line*, or *matched by wording* when the line count differs (a merged or
-split paragraph, a line the rewriter added) and the lines are matched to
-paragraphs by the words they share instead. Blank lines do not count, so a
+heavily it was reworded. When the line count differs (a merged or split
+paragraph, a line the rewriter added) the lines are matched to paragraphs by
+the words they share instead. Blank lines do not count, so a
 rewriter that puts a blank line between every paragraph is fine. The preview
 on the right updates as you paste, so a half-finished revision previews
 correctly. **Download .docx** is enabled once every canvas has text, and
-saves `<name>_revised.docx`. **Re-combine** merges several canvases into one
-for a final read-through.
+saves `<name>_revised.docx`.
+
+A canvas on the File tab can be edited before it is copied, a line deleted
+or reworded. When a canvas is copied, with its copy button or by selecting
+all of it and pressing Ctrl+C, the app keeps that text and works out again
+which paragraph each of its lines came from, so the revision is still placed
+line by line. **Refresh Locations** does the same on request, for every
+canvas: from the kept copy where a canvas was copied, and from the canvas as
+it now reads where it was not. What has been pasted on the Revise tab stays.
+A line that was deleted leaves its paragraph as it was; a line typed in that
+was never in the document is counted and written nowhere.
 
 Footnotes and endnotes are shown on a separate page below the document in
 both previews. mammoth, which renders the document, appends them to the end
@@ -209,12 +226,14 @@ js/app.js             event wiring: tabs, buttons, download
 js/modules/
   state.js            shared application state
   ui.js               element references and small UI helpers
-  file-processor.js   open and re-extract a document
+  file-processor.js   open a document, extract its highlighted text
   mammoth-helpers.js  text and table values from mammoth's document tree
-  extractor.js        body-text extraction, canvas splitting
+  extractor.js        body-text and highlighted-text extraction, canvas splitting
+  highlight.js        finding a paragraph's highlighted passages
   citations.js        citation stripping and restoring
   constants.js        style lists, reference-heading patterns, word limits
-  placement.js        placing revised lines by position, or by wording
+  placement.js        placing revised lines by position, or by wording;
+                      refreshing line locations
   alignment.js        matching revised text to extracted text by wording
   preview.js          the live preview
   docx-writer.js      writing the revision into document.xml
